@@ -1,0 +1,70 @@
+--------------> Creating Kubernetes cluster <----------------------------
+
+export bucket_name="<Enter a Bucker Name>"
+
+aws s3api create-bucket --bucket ${bucket_name} --region ap-south-1 --create-bucket-configuration LocationConstraint=ap-south-1
+
+aws s3api put-bucket-versioning --bucket ${bucket_name} --versioning-configuration Status=Enabled
+
+export KOPS_CLUSTER_NAME=imesh.k8s.local
+export KOPS_STATE_STORE=s3://${bucket_name}
+
+kops create cluster \
+--node-count=2 \
+--node-size=t2.micro \
+--zones=ap-south-1b \
+--name=${KOPS_CLUSTER_NAME}
+
+
+// To review cluster configuration
+kops edit cluster --name ${KOPS_CLUSTER_NAME}
+
+kops update cluster --name ${KOPS_CLUSTER_NAME} --yes
+
+kops validate cluster
+
+--------------> Creating Kubernetes Dashboard <----------------------------
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.0.0-beta4/aio/deploy/recommended.yaml
+
+// To get secret token
+kops get secrets admin --type secret -oplaintext
+
+--------------> Deploying and scaling Docker Containers on Kubernetes cluster <----------------------------
+
+kubectl create deployment parse-server --image=yasho98/parse-server:firsttry
+kubectl expose deployment parse-server --type=LoadBalancer --port=8080 --target-port=1337
+kubectl scale deployment parse-server --replicas=3
+
+--------------> Testing the deployment<----------------------------
+curl -X POST \
+  -H "X-Parse-Application-Id: "appid"" \
+  -H "Content-Type: application/json" \
+  -d '{}' \
+  <insert_load_balancer_url>:8080/parse/functions/hello
+
+
+--------------> Deploying Prometheus <----------------------------
+kubectl create namespace monitoring
+
+kubectl create -f clusterRole.yaml
+
+kubectl create -f config-map.yaml
+
+kubectl create  -f prometheus-deployment.yaml
+
+kubectl expose deployment prometheus-deployment --type=LoadBalancer --port=8081 --target-port=9090
+
+--------------> Deploying Alert Manager <----------------------------
+kubectl create -f AlertManagerConfigmap.yaml
+
+kubectl create -f AlertTemplateConfigMap.yaml
+
+kubectl create -f Deployment.yaml
+
+kubectl expose deployment alertmanager --type=LoadBalancer --port=8082 --target-port=9093
+
+--------------> Deleting Kubernetes cluster <----------------------------
+kubectl delete deployment parse-server
+kubectl delete svc parse-server
+kops delete cluster --name=imesh.k8s.local --yes
